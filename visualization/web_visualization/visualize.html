@@ -1,0 +1,701 @@
+
+<meta content="width=device-width,initial-scale=1" name="viewport" />
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+    <title>Scene graph visualization</title>
+    <script src="http://code.jquery.com/jquery-1.8.3.min.js"></script>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
+</head>
+<style>
+.rezentry {
+    font-size: 10px;
+    background: #ffffff;
+}
+
+.rezentry-lowlight {
+    background: #efb7ff
+}
+
+.rezentry:hover{
+    background-color: #ffb7b8;
+}
+
+.rezentry-correct {
+    font-size: 10px;
+    background: #00f095
+}
+.rezentry-highlight {
+    background: #b7daff;
+}
+
+
+.img-container > [id^="drawingLayer"] {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 1;
+    background: transparent;
+}
+.img-container > [id^="baseLayer"] {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 0;
+    background: grey;
+}
+.img-bootstrap {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 0;
+    background: grey;
+}
+.col-md-4 {
+    text-align: center;
+}
+
+
+</style>
+<body>
+<div id="nav" class="row">
+    <div id="modes" class="col-md-4">
+        Evaluation modes:
+        <div class="btn-group" data-toggle="buttons">
+            <label id="predcls" class="btn btn-primary active">
+                <input type="radio" name="modes"> Predicate Classification
+            </label>
+            <label id="sgcls" class="btn btn-primary">
+                <input type="radio" name="modes"> Scene-graph Classification
+            </label>
+            <label id="sgdet" class="btn btn-primary">
+                <input type="radio" name="modes"> Scene-graph Detection
+            </label>
+
+        </div>
+    </div>
+    <div id="selectK" class="col-md-4">
+        <div>@ K:</div>
+        <div class="btn-group" data-toggle="buttons">
+            <label id="k20" class="btn btn-primary">
+                <input type="radio" name="at_k"> @ 20
+            </label>
+            <label id="k50" class="btn btn-primary">
+                <input type="radio" name="at_k"> @ 50
+            </label>
+            <label id="k100" class="btn btn-primary active">
+                <input type="radio" name="at_k"> @ 100
+            </label>
+
+        </div>
+    </div>
+    <div id="selectImage" class="col-md-4">
+        <div id="curimg"></div>
+        <button id="random" type="button" class="btn btn-danger">Random image?</button>
+        <input id="pred_input" type="search" name="q"/>
+        <button id="search" type="button" class="btn btn-danger">search</button>
+    </div>
+</div>
+
+<div class="row">
+    <div id="img-bootstrap" class="col-lg-6">
+        <!-- <h3> Le Image</h3> -->
+        <div id="img1" class="img-container">
+        </div>
+    </div>
+    <div id="container" class="col-lg-6">
+        <div class="row" style="float: right">
+            <div id="predboxes" class="col-md-2">
+            </div>
+            <div id="predboxes-base" class="col-md-2">
+            </div>
+            <div id="gtboxes" class="col-md-2">
+            </div>
+            <div id="predrels" class="col-md-2">
+            </div>
+            <div id="predrels-base" class="col-md-2">
+            </div>
+            <div id="gtrels" class="col-md-2">
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" crossorigin="anonymous">
+</script>
+<script>
+
+
+function getColormap(num_colors) {
+    var colormaps = [];
+    for (i_c=0; i_c < num_colors; i_c++) {
+        var hue = i_c*360/num_colors;
+        var color;
+        var h = hue/60;
+        var c = 255;
+        var x = (1 - Math.abs(h%2 - 1))*255;
+
+        var i = Math.floor(h);
+        if (i == 0) color = rgb_to_hex(c, x, 0);
+        else if (i == 1) color = rgb_to_hex(x, c, 0);
+        else if (i == 2) color = rgb_to_hex(0, c, x);
+        else if (i == 3) color = rgb_to_hex(0, x, c);
+        else if (i == 4) color = rgb_to_hex(x, 0, c);
+        else color = rgb_to_hex(c, 0, x);
+        colormaps.push(color);
+    }
+    return colormaps;
+}
+
+function rgb_to_hex(red, green, blue)
+{
+  var h = ((red << 16) | (green << 8) | (blue)).toString(16);
+  // add the beginning zeros
+  while (h.length < 6) h = '0' + h;
+  return '#' + h;
+}
+
+function getRandomInt(min, max) {
+  min = Math.ceil(min);
+  max = Math.floor(max);
+  return Math.floor(Math.random() * (max - min)) + min; //The maximum is exclusive and the minimum is inclusive
+}
+
+function drawRectangle(context, color, text, rect) {
+    // var self = this;
+    var fontSize = 15
+    var lineWidth = 3;
+
+    context.beginPath();
+    var x = rect[0];
+    var y = rect[1];
+    var w = rect[2] - rect[0];
+    var h = rect[3] - rect[1];
+    context.rect(x, y, w, h);
+    context.fillStyle = 'transparent';
+    context.fill();
+    context.lineWidth = lineWidth;
+    context.strokeStyle = color;
+    context.stroke();
+
+    // Draw the bbox label
+    var w = context.measureText(text).width;
+    context.fillStyle = color;
+    context.fillRect(x,y,w,fontSize);
+
+    context.font = fontSize + "px serif";
+    context.fillStyle = "#fff";
+    context.fillText(text, x, y+fontSize - lineWidth);
+}
+
+function drawRelation(context, color, text, rect0, rect1) {
+    var fontSize = 15
+    var lineWidth = 3;
+
+    context.beginPath();
+
+    context.moveTo(rect0[0],rect0[1]);
+    context.lineTo(rect1[0],rect1[1]);
+    context.lineWidth = lineWidth;
+    context.strokeStyle = color;
+    context.stroke();
+
+    // Draw the bbox label
+    var w = context.measureText(text).width;
+    context.fillStyle = color;
+
+    var x = (rect0[0] + rect1[0]) / 2
+    var y = (rect0[1] + rect1[1]) / 2
+
+    context.fillRect(x,y,w,fontSize);
+    context.font = fontSize + "px serif";
+    context.fillStyle = "#fff";
+    context.fillText(text, x, y+fontSize - lineWidth);
+}
+
+// Global variables....
+var mode = "predcls";
+var gt_names = null;
+var pred_names = null;
+var pred_names_bs = null;
+var pred_rels = null;
+var gt_rels = null;
+var ind = 0;
+var baseCanvas = null;
+var drawingCanvas = null;
+var baseContext = null;
+var drawingContext = null;
+var pred_k = 100;
+$(document).ready(function() {
+    $.getJSON('names.json', function(names) {
+        $.getJSON("viz_results.json", function(data) {
+
+console.log('viz_results loaded');
+let searchParams = new URLSearchParams(window.location.search);
+if (searchParams.has('im')) {
+    ind = searchParams.get('im');
+}
+
+var classColorMap = getColormap(names.classes.length);
+var predColorMap = getColormap(names.preds.length);
+
+$('#predcls').click(function() {
+    mode = "predcls";
+    reset();
+});
+$('#sgcls').click(function() {
+    mode = "sgcls";
+    reset();
+});
+$('#sgdet').click(function() {
+    mode = "sgdet";
+    reset();
+});
+
+$('#k20').click(function() {
+    pred_k = 20;
+    reset();
+});
+$('#k50').click(function() {
+    pred_k = 50;
+    reset();
+});
+$('#k100').click(function() {
+    pred_k = 100;
+    reset();
+});
+
+var $el = $('#img1');
+attr_id = $el.attr('id');
+
+var baseLayerId = 'baseLayer_' + $el.attr('id');
+var drawingLayerId = 'drawingLayer_' + $el.attr('id');
+
+$el.append($('<canvas id="' + baseLayerId + '"></canvas>'));
+$el.append($('<canvas id="' + drawingLayerId + '"></canvas>'));
+
+baseCanvas = document.getElementById(baseLayerId);
+drawingCanvas = document.getElementById(drawingLayerId);
+baseContext = baseCanvas.getContext('2d');
+drawingContext = drawingCanvas.getContext('2d');
+baseContext.lineJoin = 'round';
+drawingContext.lineJoin = 'round';
+function loadImg() {
+    img = new Image();
+    img.src = data[ind].fn;
+    console.log('img src', img.src);
+    img.onload = function() {
+        var smallerDim = Math.round(1024.0 * Math.min(this.width, this.height) / Math.max(this.width, this.height));
+
+        if (this.width > this.height) {
+            baseCanvas.width = drawingCanvas.width = 1024;
+            baseCanvas.height = drawingCanvas.height = smallerDim;
+        } else {
+            baseCanvas.width = drawingCanvas.width = smallerDim;
+            baseCanvas.height = drawingCanvas.height = 1024;
+        }
+
+        baseContext.drawImage(img, 0, 0, baseCanvas.width, baseCanvas.height);
+
+        $('#img1').css({
+            height: baseCanvas.height,
+            width: baseCanvas.width
+        });
+        reset();
+    }
+}
+loadImg();
+
+$('#random').click(function() {
+    ind = getRandomInt(0, data.length);
+    loadImg();
+});
+
+// Search images by predicate
+$.getJSON('key_word2im_ind.json', function(key_word2im_ind) {
+    $('#search').click(function() {
+        var to_search = $("#pred_input").val();
+        // TODO support multiple keywords
+        if (isNaN(to_search)) {
+            var ind_candidates = key_word2im_ind[to_search];
+            if (ind_candidates) {
+                var random_int = getRandomInt(0, ind_candidates.length);
+                ind = ind_candidates[random_int];
+                loadImg();
+            } else {
+                console.log("Fail to search " + to_search)
+            }
+        } else {
+            ind = parseInt(to_search);
+            loadImg();
+        }
+    });
+});
+
+// For the box:
+// Highlight and display all neighboring GT boxes
+// Highlight all containing relationships
+// Highlight all GT relationships.
+function highlightBoxCol(ind, col) {
+    var cellsToHighlight = {"predRelsTab": {}, "gtRelsTab": {},
+                            "predDetsTab": {}, "gtDetsTab": {}}
+    cellsToHighlight[col][ind]=1;
+    var entry = $('#' + col + '.tabular tr').eq(ind);
+    if (col == "predDetsTab") {
+        var otherCol = 'gtDetsTab';
+        var displayRelCol = 'predRelsTab';
+        var otherRelCol = 'gtRelsTab';
+    } else {
+        var otherCol = 'predDetsTab';
+        var displayRelCol = 'gtRelsTab';
+        var otherRelCol = 'predRelsTab';
+    }
+    // Immediate neighbors
+    // var boxLinks = entry.data('boxLinks');
+    // for (i=0; i<boxLinks.length; ++i) {
+    //     cellsToHighlight[otherCol][boxLinks[i]] = 1;
+    // }
+    var relLinks = entry.data('relLinks');
+    for (i=0; i<relLinks.length; ++i) {
+        cellsToHighlight[displayRelCol][relLinks[i]] = 1;
+        var entry = $('#' + displayRelCol + '.tabular tr').eq(relLinks[i]);
+        cellsToHighlight[col][entry.data('obj0')] = 1;
+        cellsToHighlight[col][entry.data('obj1')] = 1;
+
+        // var entryRelLinks = entry.data('relLinks');
+        // for (j=0; j<entryRelLinks.length; j++) {
+        //     var otherEntry = $('#' + otherRelCol + '.tabular tr').eq(entryRelLinks[j]);
+    //         cellsToHighlight[otherCol][otherEntry.data('obj1')] = 1;
+    //         cellsToHighlight[otherCol][otherEntry.data('obj0')] = 1;
+    //     }
+    }
+
+    drawingContext.clearRect(0, 0, baseCanvas.width, baseCanvas.height);
+    for(col in cellsToHighlight){
+        for(row in cellsToHighlight[col]) {
+            var entry = $('#' + col + '.tabular tr').eq(row);
+
+            entry.toggleClass('rezentry-highlight');
+            if ((col == 'predDetsTab') || (col == 'gtDetsTab')) {
+                var box = entry.data('box');
+                var name = entry.data('name');
+                var color = entry.data('color');
+                drawRectangle(drawingContext, color, name, box);
+            }
+            // else if (col == displayRelCol) {
+            //     var obj0 = entry.data('obj0');
+            //     var obj1 = entry.data('obj1');
+            //
+            //     if (col == 'gtRelsTab') {
+            //         var box0 = $('#gtDetsTab.tabular tr').eq(obj0).data('box');
+            //         var box1 = $('#gtDetsTab.tabular tr').eq(obj1).data('box');
+            //     } else {
+            //         var box0 = $('#predDetsTab.tabular tr').eq(obj0).data('box');
+            //         var box1 = $('#predDetsTab.tabular tr').eq(obj1).data('box');
+            //     }
+            //     var name = entry.data('name');
+            //     var color = entry.data('color');
+            //     drawRelation(drawingContext, color, name, box0, box1);
+            // }
+        }
+    }
+}
+
+// For the Rel:
+// Highlight and display all intersecting relationships
+// Highlight all boxes for both of these relationships.
+function highlightRelCol(ind, col) {
+    pred_rels_tab_name = "predRelsTab";
+    pred_dets_tab_name = "predDetsTab";
+    if (col == "predRelsTab-base") {
+        pred_rels_tab_name = col;
+    }
+    var cellsToHighlight = {[pred_rels_tab_name]: {}, "gtRelsTab": {},
+                            [pred_dets_tab_name]: {}, "gtDetsTab": {}};
+    cellsToHighlight[col][ind]=1;
+    var entry = $('#' + col + '.tabular tr').eq(ind);
+    if (col == pred_rels_tab_name) {
+        var otherCol = 'gtRelsTab';
+        var displayDetCol = pred_dets_tab_name;
+        var otherDetCol = 'gtDetsTab';
+    } else {
+        var otherCol = pred_rels_tab_name;
+        var displayDetCol = 'gtDetsTab';
+        var otherDetCol = pred_dets_tab_name;
+    }
+    cellsToHighlight[displayDetCol][entry.data('obj0')] = 1;
+    cellsToHighlight[displayDetCol][entry.data('obj1')] = 1;
+    // Immediate neighbors
+    var relLinks = entry.data('relLinks');
+    for (i=0; i<relLinks.length; ++i) {
+        var entry = $('#' + otherCol + '.tabular tr').eq(relLinks[i]);
+        cellsToHighlight[otherCol][relLinks[i]] = 1;
+        cellsToHighlight[otherDetCol][entry.data('obj0')] = 1;
+        cellsToHighlight[otherDetCol][entry.data('obj1')] = 1;
+    }
+
+    drawingContext.clearRect(0, 0, baseCanvas.width, baseCanvas.height);
+    for(col in cellsToHighlight){
+        for(row in cellsToHighlight[col]) {
+            var entry = $('#' + col + '.tabular tr').eq(row);
+
+            entry.toggleClass('rezentry-highlight');
+            if ((col == pred_dets_tab_name) || (col == 'gtDetsTab')) {
+                var box = entry.data('box');
+                var name = entry.data('name');
+                var color = entry.data('color');
+                drawRectangle(drawingContext, color, name, box);
+            } else {
+                var obj0 = entry.data('obj0');
+                var obj1 = entry.data('obj1');
+
+                if (col == 'gtRelsTab') {
+                    var box0 = $('#gtDetsTab.tabular tr').eq(obj0).data('box');
+                    var box1 = $('#gtDetsTab.tabular tr').eq(obj1).data('box');
+                } else {
+                    var box0 = $('#' + pred_dets_tab_name + '.tabular tr').eq(obj0).data('box');
+                    var box1 = $('#' + pred_dets_tab_name + '.tabular tr').eq(obj1).data('box');
+                }
+                var name = entry.data('name');
+                var color = entry.data('color');
+                drawRelation(drawingContext, color, name, box0, box1);
+            }
+        }
+    }
+}
+
+
+
+function gtDetections(entry, classColorMap, names) {
+    /// Populate list on the right with GT detections
+    var counter = new Proxy({}, {
+        get: (target, name) => name in target ? target[name] : 0
+    })
+    var gt_names = [];
+    var table = $('<table>').addClass('tabular').attr('id', 'gtDetsTab');
+    for (i = 0; i < entry.gt_classes.length; i++) {
+        var count = counter[entry.gt_classes[i]];
+        counter[entry.gt_classes[i]] += 1;
+
+        var name = names.classes[entry.gt_classes[i]] + count
+        gt_names.push(name)
+
+        // if (mode == "sgcls") {
+        //     var score = (100 * entry.gt_box_scores[i]).toFixed(2);
+        //     var scorestr = '(' + score + '%)'
+        //     name += ' ' + scorestr
+        // }
+        var row = $('<tr></tr>').addClass('rezentry').text(name);
+
+        row.data('box', entry.gt_boxes[i]);
+        row.data('color', classColorMap[entry.gt_classes[i]]);
+        // row.data('boxLinks', entry[mode + '_gt2pred_box'][i]);
+        row.data('relLinks', []);
+        row.data('name', name);
+        row.data('row', i);
+        row.hover(function (e) {
+            highlightBoxCol($(this).data('row'), "gtDetsTab");
+        }, function (e) {
+            highlightBoxCol($(this).data('row'), "gtDetsTab");
+        });
+        table.append(row);
+    }
+    $("#gtboxes").append(table);
+    return gt_names;
+}
+
+function predDetections(entry, classColorMap, names, is_baseline=false) {
+    /// Populate list on the right with GT detections
+    var counter = new Proxy({}, {
+        get: (target, name) => name in target ? target[name] : 0
+    })
+    var pred_names = [];
+    var table = $('<table>').addClass('tabular').attr('id', 'predDetsTab');
+
+    if (mode == "predcls") {
+        var classes = entry.gt_classes;
+    } else if (mode == "sgcls") {
+        var classes = entry.sgcls_pred_classes;
+        var scores = entry.sgcls_pred_scores;
+    } else {
+        var classes = entry.sgdet_pred_classes;
+        var scores = entry.sgdet_pred_scores;
+    }
+
+    for (i = 0; i < classes.length; i++) {
+        var count = counter[classes[i]];
+        counter[classes[i]] += 1;
+
+        var name = names.classes[classes[i]] + count;
+        pred_names.push(name)
+
+        if (mode != "predcls") {
+            name += ' (' + scores[i].toFixed(2) + ')'
+        }
+        var row = $('<tr></tr>').addClass('rezentry').text(name);
+
+        if (mode != "sgdet") {
+            row.data('box', entry.gt_boxes[i]);
+        } else {
+            row.data('box', entry.pred_boxes[i]);
+        }
+        row.data('color', classColorMap[classes[i]]);
+        // row.data('boxLinks', entry[mode + '_pred2gt_box'][i]);
+        row.data('relLinks', []);
+        row.data('name', name);
+        row.data('row', i);
+        row.hover(function (e) {
+            highlightBoxCol($(this).data('row'), "predDetsTab");
+        }, function (e) {
+            highlightBoxCol($(this).data('row'), "predDetsTab");
+        });
+        table.append(row);
+    }
+    var visu_element = "#predboxes";
+    if (is_baseline)
+        visu_element += "-base";
+    $(visu_element).append(table);
+    return pred_names;
+}
+
+function gtRelationships(entry, predColorMap, gt_box_names,  names) {
+    /// Populate list on the right with GT detections
+    //   var gt_names = [];
+    var table = $('<table>').addClass('tabular').attr('id', 'gtRelsTab');
+    var rel_names = [];
+    for (i = 0; i < entry.gt_rels.length; i++) {
+
+        var rel = entry.gt_rels[i];
+        var box1name = gt_box_names[rel[0]];
+        var box2name = gt_box_names[rel[1]];
+        var predname = names.preds[rel[2]];
+
+        var name = box1name + ' ' + predname + ' ' + box2name;
+        // var score = (entry[mode + '_gt_rels_scores'][i]).toFixed(3);
+        // var scorecls = (entry[mode + '_gt_rels_scores_cls'][i]).toFixed(3);
+        // name += ' P:' + score + ' T:' + scorecls;
+        rel_names.push(name);
+        var row = $('<tr></tr>').addClass('rezentry').text(name);
+
+        row.data('obj0', rel[0]);
+        row.data('obj1', rel[1]);
+
+        $('#gtDetsTab.tabular tr').eq(rel[0]).data('relLinks').push(i);
+        $('#gtDetsTab.tabular tr').eq(rel[1]).data('relLinks').push(i);
+
+        row.data('name', name);
+        row.data('color', predColorMap[rel[2]]);
+        row.data('row', i);
+        row.data('relLinks', entry[mode + '_gt2pred_rel'][i]);
+
+        var relLinks = entry[mode + '_gt2pred_rel'][i];
+        if (relLinks.length > 0) {
+            row.attr('class', 'rezentry-correct');
+        }
+
+        row.hover(function (e) {
+            highlightRelCol($(this).data('row'), "gtRelsTab");
+        }, function (e) {
+            highlightRelCol($(this).data('row'), "gtRelsTab");
+        });
+        table.append(row);
+    }
+    $("#gtrels").append(table);
+    return rel_names;
+}
+
+function predRelationships(entry, predColorMap, pred_box_names, names, is_baseline=false) {
+    /// Populate list on the right with GT detections
+    //   var gt_names = [];
+    rels_tab_name = 'predRelsTab';
+    if (is_baseline)
+        rels_tab_name += '-base';
+    var table = $('<table>').addClass('tabular').attr('id', rels_tab_name);
+    pred_rels = entry[mode + '_pred_rels'].slice(0, pred_k);
+
+    var makeHandler = function (tab_name) {
+        return function () {
+            highlightRelCol($(this).data('row'), tab_name)
+        };
+    };
+    for (i = 0; i < pred_rels.length; i++) {
+        var rel = pred_rels[i];
+        var box1name = pred_box_names[rel[0]];
+        var box2name = pred_box_names[rel[1]];
+        var predname = names.preds[rel[2]];
+
+        var name = box1name + ' ' + predname + ' ' + box2name;
+
+        var score = (entry[mode + '_pred_rels_scores'][i]).toFixed(3);
+        if (entry.hasOwnProperty('uncertainty'))
+            name += ' (S: ' + score + ' U: ' + entry['uncertainty'][i].toFixed(3) + ')';
+        else
+            name += ' (S: ' + score + ')';
+
+        var row = $('<tr></tr>').addClass('rezentry').text(name);
+
+        row.data('obj0', rel[0]);
+        row.data('obj1', rel[1]);
+        row.data('name', name);
+
+        $('#predDetsTab.tabular tr').eq(rel[0]).data('relLinks').push(i);
+        $('#predDetsTab.tabular tr').eq(rel[1]).data('relLinks').push(i);
+
+        row.data('color', predColorMap[rel[2]]);
+        row.data('row', i);
+        row.data('relLinks', entry[mode + '_pred2gt_rel'][i]);
+
+        var relLinks = entry[mode + '_pred2gt_rel'][i];
+        if (relLinks.length > 0) {
+            row.attr('class', 'rezentry-correct');
+        }
+
+        // Use closure to avoid passing wrong arguments
+        handler = makeHandler(rels_tab_name);
+        row.hover(handler, handler);
+
+        table.append(row);
+    }
+    var visu_element = "#predrels";
+    if (is_baseline) {
+        visu_element += "-base";
+    }
+    $(visu_element).append(table);
+    return 0;
+}
+
+// Resets the canvas
+function reset() {
+    $("#gtboxes").html('<h4>GT boxes</h4>');
+    $("#gtrels").html('<h4>GT rels</h4>');
+    $("#predboxes").html('<h4>Pred boxes</h4>');
+    $("#predboxes-base").html('<h4>Baseline boxes</h4>');
+    $("#predrels").html('<h4>Pred rels</h4>');
+    $("#predrels-base").html('<h4>Baseline</h4>');
+    $("#curimg").html('<h5>Current image: ' + ind + '</h5>');
+
+    gt_names = gtDetections(data[ind], classColorMap, names);
+    gtRelationships(data[ind], predColorMap, gt_names, names);
+
+    pred_names = predDetections(data[ind]['pred'],  classColorMap, names);
+    predRelationships(data[ind]['pred'], predColorMap, pred_names, names);
+
+    pred_names_bs = predDetections(data[ind]['pred_baseline'],  classColorMap, names, true);
+    predRelationships(data[ind]['pred_baseline'], predColorMap, pred_names_bs, names, true);
+
+    drawingContext.clearRect(0, 0, baseCanvas.width, baseCanvas.height);
+}
+
+        }).fail(function () {
+            console.log('fail to parse json')
+        });
+    });
+});
+</script>
+
+  </body>
+</html>
